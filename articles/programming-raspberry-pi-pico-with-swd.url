@@ -1,0 +1,61 @@
+# Learn how to Program and Debug Raspberry Pi Pico with SWD
+https://www.electronicshub.org/programming-raspberry-pi-pico-with-swd/
+
+### alter reference to setup openocd swd gdb on top of rasPi 
+https://iosoft.blog/2019/01/28/raspberry-pi-openocd/
+
+################# quick notes on rpcess and fixes **************
+# 1.
+	sudo apt install automake autoconf build-essential texinfo pkg-config 
+	sudo apt install libtool libftdi-dev libusb-1.0-0-dev
+
+# 2.
+	git clone https://github.com/raspberrypi/openocd.git --recursive --branch rp2040 --depth=1
+	cd openocd
+	./bootstrap
+	./configure --enable-ftdi --enable-sysfsgpio --enable-bcm2835gpio
+	make -j4
+	sudo make install
+
+# 3.
+	sudo apt install gdb-multiarch
+
+# 4.
+	Raspberry Pi Pico		Raspberry Pi
+	
+	SWDIO 				GPIO 24 (PIN 18)
+
+	SWD GND				GND (PIN 20)
+
+	SWCLK 				GPIO 25 (PIN 22)
+
+# 5.
+	cd pico-examples/build/
+	make blink
+
+# 6.
+	sudo openocd -f interface/raspberrypi-swd.cfg -f target/rp2040.cfg -c 'program blink/blink.elf verify reset exit'
+
+# 7. 
+	cd pico-examples/
+	rm -rf build
+	mkdir build
+	cd build
+	export PICO_SDK_PATH=../../pico-sdk
+	cmake -DCMAKE_BUILD_TYPE=Debug ..
+
+# 8.
+	cd blink
+	make -j4
+
+# 9.
+	sudo openocd -f interface/raspberrypi-swd.cfg -f target/rp2040.cfg
+
+# 10.
+	gdb-multiarch blink.elf
+
+	(gdb) target remote localhost:3333
+	(gdb) load
+	(gdb) monitor reset init
+	(gdb) continue
+
