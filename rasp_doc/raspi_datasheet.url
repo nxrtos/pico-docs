@@ -1,0 +1,36 @@
+#
+https://datasheets.raspberrypi.org
+#############################################
+ Raspberry Pi Datasheets
+
+    bcm2711/bcm2711-peripherals.pdf
+    case-fan/case-fan-product-brief.pdf
+    cm4/CM4-step.zip
+    cm4/CM4Lite-step.zip
+    cm4/cm4-antenna-kit-product-brief.pdf
+    cm4/cm4-datasheet.pdf
+    cm4/cm4-product-brief.pdf
+    cm4io/CM4IO-KiCAD.zip
+    cm4io/cm4io-datasheet.pdf
+    cm4io/cm4io-product-brief.pdf
+    iqaudio/iqaudio-product-brief.pdf
+    pi400/pi400-product-brief.pdf
+    pico/Pico-R3-A4-Pinout.pdf
+    pico/Pico-R3-Fritzing.fzpz
+    pico/Pico-R3-step.zip
+    pico/RPi-Pico-R3-PUBLIC-20200119.zip
+    pico/getting-started-with-pico.pdf
+    pico/pico-datasheet.pdf
+    pico/pico-product-brief.pdf
+    pico/raspberry-pi-pico-c-sdk.pdf
+    pico/raspberry-pi-pico-faq.pdf
+    pico/raspberry-pi-pico-python-sdk.pdf
+    poe/poe-plus-hat-product-brief.pdf
+    rp2040/Minimal-KiCAD.zip
+    rp2040/VGA-KiCAD.zip
+    rp2040/hardware-design-with-rp2040.pdf
+    rp2040/rp2040-datasheet.pdf
+    rp2040/rp2040-product-brief.pdf
+    rpi3/raspberry-pi-3-a-plus-product-brief.pdf
+    rpi4/raspberry-pi-4-product-brief.pdf
+
