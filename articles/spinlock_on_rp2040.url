@@ -1,0 +1,188 @@
+# raspico Spin Locks
+https://raspberrypi.github.io/pico-sdk-doxygen/group__hardware__sync.html
+
+########################################################################
+Spin Locks
+
+The RP2040 provides 32 hardware spin locks, which can be used to manage mutually-exclusive access to shared software and hardware resources.
+
+Generally each spin lock itself is a shared resource, i.e. the same hardware spin lock can be used by multiple higher level primitives (as long as the spin locks are neither held for long periods, nor held concurrently with other spin locks by the same core - which could lead to deadlock). A hardware spin lock that is exclusively owned can be used individually without more flexibility and without regard to other software. Note that no hardware spin lock may be acquired re-entrantly (i.e. hardware spin locks are not on their own safe for use by both thread code and IRQs) however the default spinlock related methods here (e.g. spin_lock_blocking) always disable interrupts while the lock is held as use by IRQ handlers and user code is common/desirable, and spin locks are only expected to be held for brief periods.
+
+The SDK uses the following default spin lock assignments, classifying which spin locks are reserved for exclusive/special purposes vs those suitable for more general shared use:
+
+
+# 2.3. Processor subsystem in << RP2040 Datasheet >> .pdf
+  2.3.1. SIO
+  The Single-cycle IO block (SIO) contains several peripherals that require low-latency, deterministic access from the
+processors. It is accessed via each processor’s IOPORT: this is an auxiliary bus port on the Cortex-M0+ which can
+perform rapid 32-bit reads and writes. The SIO has a dedicated bus interface for each processor’s IOPORT, as shown in
+Figure 7. Processors access their IOPORT with normal load and store instructions, directed to the special IOPORT
+address segment, 0xd0000000…0xdfffffff . The SIO appears as memory-mapped hardware within the IOPORT space.
+  The SIO is not connected to the main system bus due to its tight timing requirements. It can only be accessed by the
+processors, or by the debugger via the processor debug ports.
+All IOPORT reads and writes (and therefore all SIO accesses) take place in exactly one cycle, unlike the main AHB-Lite
+system bus, where the Cortex-M0+ requires two cycles for a load or store, and may have to wait longer due to
+contention from other system bus masters. This is vital for interfaces such as GPIO, which have tight timing
+requirements.
+  SIO registers are mapped to word-aligned addresses in the range 0xd0000000…0xd000017c . The remainder of the IOPORT
+space is reserved for future use.
+  The SIO peripherals are described in more detail in the following sections.
+
+    2.3.1.1. CPUID
+    The register CPUID is the first register in the IOPORT space. Core 0 reads a value of 0 when accessing this address, and core 1 reads a value of 1. This is a convenient method for software to determine on which core it is running. This is checked during the initial boot sequence: both cores start running simultaneously, core 1 goes into a deep sleep state, and core 0 continues with the main boot sequence.
+
+    2.3.1.2. GPIO Control
+    The processors have access to GPIO registers for fast and direct control of pins with GPIO functionality. There are two identical sets of registers:
+	• GPIO_x for direct control of IO bank 0 (user GPIOs 0 to 29, starting at the LSB)
+	• GPIO_HI_x for direct control of the QSPI IO bank (in the order SCLK, SSn, SD0, SD1, SD2, SD3, starting at the LSB)
+
+    2.3.1.3. Hardware Spinlocks
+    The SIO provides 32 hardware spinlocks, which can be used to manage mutually-exclusive access to shared software resources. Each spinlock is a one-bit flag, mapped to a different address (from SPINLOCK0 to SPINLOCK31). Software interacts with each spinlock with one of the following operations:
+	• Read: attempt to claim the lock. Read value is nonzero if the lock was successfully claimed, or zero if the lock had already been claimed by a previous read.
+	• Write (any value): release the lock. The next attempt to claim the lock will be successful.
+    If both cores try to claim the same lock on the same clock cycle, core 0 succeeds.
+    Generally software will acquire a lock by repeatedly polling the lock bit ("spinning" on the lock) until it is successfully claimed. This is inefficient if the lock is held for long periods, so generally the spinlocks should be used to protect the short critical sections of higher-level primitives such as mutexes, semaphores and queues.
+    For debugging purposes, the current state of all 32 spinlocks can be observed via SPINLOCK_ST.
+
+	SIO: SPINLOCK_ST Register
+	Offset: 0x05c
+	Bits Description Type Reset
+	31:0 Spinlock state RO 0x00000000
+	A bitmap containing the state of all 32 spinlocks (1=locked).
+	Mainly intended for debugging.
+    2.3.1.4. Inter-processor FIFOs (Mailboxes)
+    The SIO contains two FIFOs for passing data, messages or ordered events between the two cores. Each FIFO is 32 bits wide, and eight entries deep. One of the FIFOs can only be written by core 0, and read by core 1. The other can only be written by core 1, and read by core 0. Each core writes to its outgoing FIFO by writing to FIFO_WR, and reads from its incoming FIFO by reading from FIFO_RD.
+    A status register, FIFO_ST, provides the following status signals:
+	• Incoming FIFO contains data ( VLD )
+	• Outgoing FIFO has room for more data ( RDY )
+	• The incoming FIFO was read from while empty at some point in the past ( ROE )
+	• The outgoing FIFO was written to while full at some point in the past ( WOF )
+	Writing to the outgoing FIFO while full, or reading from the incoming FIFO while empty, does not affect the FIFO state. The current contents and level of the FIFO is preserved. However, this does represent some loss of data or reception of invalid data by the software accessing the FIFO, so a sticky error flag is raised ( ROE or WOF ). The SIO has a FIFO IRQ output for each core, mapped to system IRQ numbers 15 and 16 . Each IRQ output is the logical
+OR of the VLD , ROE and WOF bits in that core’s FIFO_ST register: that is, the IRQ is asserted if any of these three bits is high, and clears again when they are all low. The ROE and WOF flags are cleared by writing any value to FIFO_ST, and the VLD flag is cleared by reading data from the FIFO until empty. If the corresponding interrupt line is enabled in the Cortex-M0+ NVIC, then the processor will take an interrupt each time data appears in its FIFO, or if it has performed some invalid FIFO operation (read on empty, write on full). Typically Core 0 will use IRQ15 and core 1 will use IRQ16. If the IRQs are used the other way round then it is difficult for the core that has been interrupted to correctly identify the reason for the interrupt as the core doesn’t have access to the other core’s FIFO status register.
+	### This is a kind of invilid setting/arranging. So don't do it.
+	### enable IRQ 15 only on Core 0, and IRQ 16 on Core 1.  Never do other way.
+	NOTE
+	ROE and WOF only become set if software misbehaves in some way. Generally, the interrupt handler will trigger when data appears in the FIFO (raising the VLD flag), and the interrupt handler clears the IRQ by reading data from the FIFO until VLD goes low once more.
+	The inter-processor FIFOs and the Cortex-M0+ Event signals are used by the bootrom (Section 2.8) wait_for_vector routine, where core 1 remains in a sleep state until it is woken, and provided with its initial stack pointer, entry point and vector table through the FIFO.
+	2.3.1.5. Integer Divider
+	The SIO provides one 8-cycle signed/unsigned divide/modulo module to each of the cores. Calculation is started by writing a dividend and divisor to the two argument registers, DIVIDEND and DIVISOR . The divider calculates the quotient / and remainder % of this division over the next 8 cycles, and on the 9th cycle the results can be read from the two result registers DIV_QUOTIENT and DIV_REMAINDER. A 'ready' bit in register DIV_CSR can be polled to wait for the calculation to complete, or software can insert a fixed 8-cycle delay. Software is free to perform other non divider operations during these 8 cycles.
+There are two aliases of the operand registers: writing to the signed alias (DIV_SDIVIDEND and DIV_SDIVISOR) will initiate a signed calculation, and the other (DIV_UDIVIDEND and DIV_UDIVISOR) will initiate an unsigned calculation.
+	NOTE
+	A new calculation begins immediately with every write to an operand register, and a new operand write immediately squashes any calculation currently in progress. For example, when dividing many numbers by the same divisor, only xDIVIDEND needs to be written, and the signedness of each calculation is determined by whether SDIVIDEND or UDIVIDEND is written. 
+	To support save and restore on interrupt handler entry/exit (or on e.g. an RTOS context switch), the result registers are also writable. Writing to a result register will cancel any operation in progress at the time. The DIV_CSR.DIRTY flag can help make save/restore more efficient: this flag is set when any divider register (operand or result) is written to, and cleared when the quotient is read.
+	NOTE
+	When enabled, the default divider AEABI support maps C level / and % to the hardware divider. When building software using the SDK and using the divider directly, it is important to read the quotient register last. This ensures the partial divider state will be correctly saved and restored by any interrupt code that uses the divider. You should read the quotient register whether you need the value or not.	The SDK module pico_divider https://github.com/raspberrypi/pico-sdk/tree/master/src/common/pico_divider/include/pico/divider.h provides both the AEABI implementation needed to hook the C / and % operators for both 32-bit and 64-bit integer division, as well as some additional C functions that return quotients and remainders at the same time. All of these functions correctly save and restore the hardware divider state (when dirty) so that they can be used in either user or IRQ handler code.
+	The SDK module hardware_divider https://github.com/raspberrypi/pico-sdk/tree/master/src/rp2_common/hardware_divider/include/hardware/divider.h provides lower level macros and helper functions for accessing the hardware_divider, but these do not save and restore the hardware divider state (although this header does provide separate functions to do so).
+	2.3.1.6. Interpolator
+	Each core is equipped with two interpolators ( INTERP0 and INTERP1 ) which can accelerate tasks by combining certain pre-configured operations into a single processor cycle. Intended for cases where the pre-configured operation is repeated many times, this results in code which uses both fewer CPU cycles and fewer CPU registers in the time-critical sections of the code.
+	The interpolators are used to accelerate audio operations within the SDK, but their flexible configuration makes it possible to optimise many other tasks such as quantization and dithering, table lookup address generation, affine texture mapping, decompression and linear feedback
+		2.3.1.6.1. Lane Operations
+
+		2.3.1.6.2. Blend Mode
+
+		2.3.1.6.3. Clamp Mode
+
+		2.3.1.6.4. Sample Use Case: Linear Interpolation
+
+		2.3.1.6.5. Sample Use Case: Simple Affine Texture Mapping
+
+	2.3.1.7. List of Registers
+	The SIO registers start at a base address of 0xd0000000 (defined as SIO_BASE in SDK).
+
+	Offset 	Name 		Info
+	0x000 CPUID Processor core identifier
+	0x004 GPIO_IN Input value for GPIO pins
+	0x008 GPIO_HI_IN Input value for QSPI pins
+	0x010 GPIO_OUT GPIO output value
+	0x014 GPIO_OUT_SET GPIO output value set
+	0x018 GPIO_OUT_CLR GPIO output value clear
+	0x01c GPIO_OUT_XOR GPIO output value XOR
+	0x020 GPIO_OE GPIO output enable
+	0x024 GPIO_OE_SET GPIO output enable set
+	0x028 GPIO_OE_CLR GPIO output enable clear
+	0x02c GPIO_OE_XOR GPIO output enable XOR
+	0x030 GPIO_HI_OUT QSPI output value
+	0x034 GPIO_HI_OUT_SET QSPI output value set
+	0x038 GPIO_HI_OUT_CLR QSPI output value clear
+	0x03c GPIO_HI_OUT_XOR QSPI output value XOR
+	0x040 GPIO_HI_OE QSPI output enable
+	0x044 GPIO_HI_OE_SET QSPI output enable set
+	0x048 GPIO_HI_OE_CLR QSPI output enable clear
+	0x04c GPIO_HI_OE_XOR QSPI output enable XOR
+	0x050 FIFO_ST Status register for inter-core FIFOs (mailboxes).
+	0x054 FIFO_WR Write access to this core’s TX FIFO
+	0x058 FIFO_RD Read access to this core’s RX FIFO
+	0x05c SPINLOCK_ST Spinlock state
+	0x060 DIV_UDIVIDEND Divider unsigned dividend
+	0x064 DIV_UDIVISOR Divider unsigned divisor
+	0x068 DIV_SDIVIDEND Divider signed dividend
+	0x06c DIV_SDIVISOR Divider signed divisor
+	0x070 DIV_QUOTIENT Divider result quotient
+	0x074 DIV_REMAINDER Divider result remainder
+	0x078 DIV_CSR Control and status register for divider.
+	0x080 INTERP0_ACCUM0 Read/write access to accumulator 0
+	0x084 INTERP0_ACCUM1 Read/write access to accumulator 1
+	0x088 INTERP0_BASE0 Read/write access to BASE0 register.
+	0x08c INTERP0_BASE1 Read/write access to BASE1 register.
+	0x090 INTERP0_BASE2 Read/write access to BASE2 register.
+	0x094 INTERP0_POP_LANE0 Read LANE0 result, and simultaneously write lane results to both accumulators (POP).
+	0x098 INTERP0_POP_LANE1  Read LANE1 result, and simultaneously write lane results to both
+accumulators (POP).
+	0x09c INTERP0_POP_FULL Read FULL result, and simultaneously write lane results to both accumulators (POP).
+	0x0a0 INTERP0_PEEK_LANE0 Read LANE0 result, without altering any internal state (PEEK).
+	0x0a4 INTERP0_PEEK_LANE1 Read LANE1 result, without altering any internal state (PEEK).
+	0x0a8 INTERP0_PEEK_FULL Read FULL result, without altering any internal state (PEEK).
+	0x0ac INTERP0_CTRL_LANE0 Control register for lane 0
+	0x0b0 INTERP0_CTRL_LANE1 Control register for lane 1
+	0x0b4 INTERP0_ACCUM0_ADD Values written here are atomically added to ACCUM0
+	0x0b8 INTERP0_ACCUM1_ADD Values written here are atomically added to ACCUM1
+	0x0bc INTERP0_BASE_1AND0 On write, the lower 16 bits go to BASE0, upper bits to BASE1 simultaneously.
+	0x0c0 INTERP1_ACCUM0 Read/write access to accumulator 0
+	0x0c4 INTERP1_ACCUM1 Read/write access to accumulator 1
+	0x0c8 INTERP1_BASE0 Read/write access to BASE0 register.
+	0x0cc INTERP1_BASE1 Read/write access to BASE1 register.
+	0x0d0 INTERP1_BASE2 Read/write access to BASE2 register.
+	0x0d4 INTERP1_POP_LANE0 Read LANE0 result, and simultaneously write lane results to both accumulators (POP).
+	0x0d8 INTERP1_POP_LANE1 Read LANE1 result, and simultaneously write lane results to both
+accumulators (POP).
+	0x0dc INTERP1_POP_FULL Read FULL result, and simultaneously write lane results to both accumulators (POP).
+	0x0e0 INTERP1_PEEK_LANE0 Read LANE0 result, without altering any internal state (PEEK).
+	0x0e4 INTERP1_PEEK_LANE1 Read LANE1 result, without altering any internal state (PEEK).
+	0x0e8 INTERP1_PEEK_FULL Read FULL result, without altering any internal state (PEEK).
+	0x0ec INTERP1_CTRL_LANE0 Control register for lane 0
+	0x0f0 INTERP1_CTRL_LANE1 Control register for lane 1
+	0x0f4 INTERP1_ACCUM0_ADD Values written here are atomically added to ACCUM0
+	0x0f8 INTERP1_ACCUM1_ADD Values written here are atomically added to ACCUM1
+	0x0fc INTERP1_BASE_1AND0 On write, the lower 16 bits go to BASE0, upper bits to BASE1 simultaneously.
+	0x100 SPINLOCK0 Spinlock register 0
+	0x104 SPINLOCK1 Spinlock register 1
+	0x108 SPINLOCK2 Spinlock register 2
+	0x10c SPINLOCK3 Spinlock register 3
+	0x110 SPINLOCK4 Spinlock register 4
+	0x114 SPINLOCK5 Spinlock register 5
+	0x118 SPINLOCK6 Spinlock register 6
+	0x11c SPINLOCK7 Spinlock register 7
+	0x120 SPINLOCK8 Spinlock register 8
+	0x124 SPINLOCK9 Spinlock register 9
+	0x128 SPINLOCK10 Spinlock register 10
+	0x12c SPINLOCK11 Spinlock register 11
+	0x130 SPINLOCK12 Spinlock register 12
+	0x134 SPINLOCK13 Spinlock register 13
+	0x138 SPINLOCK14 Spinlock register 14
+	0x13c SPINLOCK15 Spinlock register 15
+	0x140 SPINLOCK16 Spinlock register 16
+	0x144 SPINLOCK17 Spinlock register 17
+	0x148 SPINLOCK18 Spinlock register 18
+	0x14c SPINLOCK19 Spinlock register 19
+	0x150 SPINLOCK20 Spinlock register 20
+	0x154 SPINLOCK21 Spinlock register 21
+	0x158 SPINLOCK22 Spinlock register 22
+	0x15c SPINLOCK23 Spinlock register 23
+	0x160 SPINLOCK24 Spinlock register 24
+	0x164 SPINLOCK25 Spinlock register 25
+	0x168 SPINLOCK26 Spinlock register 26
+	0x16c SPINLOCK27 Spinlock register 27
+	0x170 SPINLOCK28 Spinlock register 28
+	0x174 SPINLOCK29 Spinlock register 29
+	0x178 SPINLOCK30 Spinlock register 30
+	0x17c SPINLOCK31 Spinlock register 31

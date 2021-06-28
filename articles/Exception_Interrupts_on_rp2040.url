@@ -1,0 +1,95 @@
+
+# 2.3.2. Interrupts in << RP2040 Datasheet >> .pdf
+2.3.2. Interrupts
+  Each core is equipped with a standard ARM Nested Vectored Interrupt Controller (NVIC) which has 32 interrupt inputs. Each NVIC has the same interrupts routed to it, with the exception of the GPIO interrupts: there is one GPIO interrupt per bank, per core. These are completely independent, so e.g. core 0 can be interrupted by GPIO 0 in bank 0, and core 1 by GPIO 1 in the same bank.
+  On RP2040, only the lower 26 IRQ signals are connected on the NVIC, and IRQs 26 to 31 are tied to zero (never firing). The core can still be forced to enter the relevant interrupt handler by writing bits 26 to 31 in the NVIC ISPR register.
+
+IRQ Interrupt Source IRQ Interrupt Source IRQ Interrupt Source IRQ Interrupt Source IRQ Interrupt Source
+0 TIMER_IRQ_0 		6 XIP_IRQ 	12 DMA_IRQ_1 		18 SPI0_IRQ 	24 I2C1_IRQ
+1 TIMER_IRQ_1 		7 PIO0_IRQ_0 	13 IO_IRQ_BANK0 	19 SPI1_IRQ 	25 RTC_IRQ
+2 TIMER_IRQ_2 		8 PIO0_IRQ_1 	14 IO_IRQ_QSPI 		20 UART0_IRQ 	
+3 TIMER_IRQ_3 		9 PIO1_IRQ_0 	15 SIO_IRQ_PROC0 	21 UART1_IRQ 
+4 PWM_IRQ_WRAP 		10 PIO1_IRQ_1 	16 SIO_IRQ_PROC1 	22 ADC_IRQ_FIFO 
+5 USBCTRL_IRQ 		11 DMA_IRQ_0 	17 CLOCKS_IRQ 		23 I2C0_IRQ
+
+  Nested interrupts are supported in hardware: a lower-priority interrupt can be preempted by a higher-priority interrupt (or another exception e.g. HardFault), and the lower-priority interrupt will resume once higher-priority exceptions have completed. The priority order is determined by:
+• First, the dynamic priority level configured per interrupt by the NVIC_IPR0-7 registers. The Cortex-M0+ implements the two most significant bits of an 8-bit priority field, so four priority levels are available, and the numerically-lowest level (level 0) is the highest priority.
+• Second, for interrupts with the same dynamic priority level, the lower-numbered IRQ has higher priority (using the IRQ numbers given in the table above).
+  Some care has gone into arranging the RP2040 interrupt table to give a sensible default priority ordering, but individual interrupts can be raised or lowered in priority, using NVIC_IPR0 through NVIC_IPR7, to suit a particular use case.
+  The 26 system IRQ signals are masked (NMI mask) and then ORed together creating the NMI signal for the core. The NMI mask for each core can be configured using PROC0_NMI_MASK and PROC1_NMI_MASK in the Syscfg register block. Each of these registers has one bit for each system interrupt, and the each core’s NMI is asserted if a system interrupt is asserted and the corresponding NMI mask bit is set for that core.
+  ### CAUTION
+  If the watchdog is armed, and some bits are set on the core 1 NMI mask, the RESETS block (and hence Syscfg) should be included in the watchdog reset list. Otherwise, following a watchdog event, core 1 NMI may be asserted when the core enter the bootrom. It is safe for core 0 to take an NMI when entering the bootrom (the handler will clear the NMI mask).
+
+# 2.4.3.6. Exceptions in << RP2040 Datasheet >> .pdf
+  This section describes the exception model of the processor.
+  # 2.4.3.6.1. Exception handling
+  The processor implements advanced exception and interrupt handling, as described in the ARMv6-M Architecture Reference Manual. To minimize interrupt latency, the processor abandons any load-multiple or store-multiple instruction to take any pending interrupt. On return from the interrupt handler, the processor restarts the load-multiple or store-multiple instruction from the beginning.
+This means that software must not use load-multiple or store-multiple instructions when a device is accessed in a memory region that is read-sensitive or sensitive to repeated writes. The software must not use these instructions in any case where repeated reads or writes might cause inconsistent results or unwanted side-effects.
+The processor implementation can ensure that a fixed number of cycles are required for the NVIC to detect an interrupt signal and the processor fetch the first instruction of the associated interrupt handler. If this is done, the highest priority interrupt is jitter-free. This will depend on where the interrupt handler is located and if another higher priority master is accessing that memory. SRAM4 and SRAM5 are provided that may be allocated to interrupt handlers for each processor
+so this is jitter-free. To reduce interrupt latency and jitter, the Cortex-M0+ processor implements both interrupt late-arrival and interrupt tail-chaining mechanisms, as defined by the ARMv6-M architecture. The worst case interrupt latency, for the highest priority active interrupt in a zero wait-state system not using jitter suppression, is 15 cycles. The processor exception model has the following implementation-defined behaviour in addition to the architecture specified behaviour:
+	• Exceptions on stacking from HardFault to NMI lockup at NMI priority.
+	• Exceptions on unstacking from NMI to HardFault lockup at HardFault priority.
+
+
+# 2.4.5. NVIC
+  # 2.4.5.1. About the NVIC
+  External interrupt signals connect to the Nested Vectored Interrupt Controller (NVIC), and the NVIC prioritizes the interrupts. Software can set the priority of each interrupt. The NVIC and the Cortex-M0+ processor core are closely coupled, providing low latency interrupt processing and efficient processing of late arriving interrupts.
+  NOTE
+  "Nested" refers to the fact that interrupts can themselves be interrupted, by higher-priority interrupts. "Vectored" refers to the hardware dispatching each interrupt to a distinct handler routine, specified by the vector table. Details of nesting and vectoring behaviour are given in the ARMv6-M Architecture Reference Manual.
+  All NVIC registers are only accessible using word transfers. Any attempt to read or write a halfword or byte individually is unpredictable. NVIC registers are always little-endian.
+  Processor exception handling is described in Exceptions section.
+    # 2.4.5.1.1. SysTick timer
+    A 24-bit SysTick system timer, extends the functionality of both the processor and the NVIC and provides:
+	• A 24-bit system timer (SysTick).
+	• Additional configurable priority SysTick interrupt.
+    The SysTick timer uses a 1μs pulse as a clock enable. This is generated in the watchdog block as timer_tick. Accuracy of SysTick timing depends upon accuracy of this timer_tick. The SysTick timer can also run from the system clock (see SYST_CALIB).
+    See the ARMv6-M Architecture Reference Manual for more information.
+    # 2.4.5.1.2. Low power modes
+    The implementation includes a WIC. This enables the processor and NVIC to be put into a very low-power sleep mode leaving the WIC to identify and prioritize interrupts.
+    The processor fully implements the Wait For Interrupt (WFI), Wait For Event (WFE) and the Send Event (SEV) instructions. In addition, the processor also supports the use of SLEEPONEXIT, that causes the processor core to enter sleep mode when it returns from an exception handler to Thread mode. See the ARMv6-M Architecture Reference Manual for more information.
+
+  # 2.4.5.2. NVIC register summary
+  Table 85 shows the NVIC registers. Each of these registers is 32 bits wide.
+  Name Description
+	NVIC_ISER 	Interrupt Set-Enable Register.
+	NVIC_ICER 	Interrupt Clear-Enable Register.
+	NVIC_ISPR 	Interrupt Set-Pending Register.
+	NVIC_ICPR 	Interrupt Clear-Pending Register.
+	NVIC_IPR0 - NVIC_IPR7 	Interrupt Priority Registers.
+
+  Note
+  See the List of Registers or ARMv6-M Architecture Reference Manual for more information about the NVIC registers and their addresses, access types, and reset values.
+
+# 2.4.8. List of Registers
+The ARM Cortex-M0+ registers start at a base address of 0xe0000000 (defined as PPB_BASE in SDK).
+  Offset Name Info
+  0xe010 SYST_CSR SysTick Control and Status Register
+  0xe014 SYST_RVR SysTick Reload Value Register
+  0xe018 SYST_CVR SysTick Current Value Register
+  0xe01c SYST_CALIB SysTick Calibration Value Register
+  0xe100 NVIC_ISER Interrupt Set-Enable Register
+  0xe180 NVIC_ICER Interrupt Clear-Enable Register
+  0xe200 NVIC_ISPR Interrupt Set-Pending Register
+  0xe280 NVIC_ICPR Interrupt Clear-Pending Register
+  0xe400 NVIC_IPR0 Interrupt Priority Register 0
+  0xe404 NVIC_IPR1 Interrupt Priority Register 1
+  0xe408 NVIC_IPR2 Interrupt Priority Register 2
+  0xe40c NVIC_IPR3 Interrupt Priority Register 3
+  0xe410 NVIC_IPR4 Interrupt Priority Register 4
+  0xe414 NVIC_IPR5 Interrupt Priority Register 5
+  0xe418 NVIC_IPR6 Interrupt Priority Register 6
+  0xe41c NVIC_IPR7 Interrupt Priority Register 7
+  0xed00 CPUID CPUID Base Register
+  0xed04 ICSR Interrupt Control and State Register
+  0xed08 VTOR Vector Table Offset Register
+  0xed0c AIRCR Application Interrupt and Reset Control Register
+  0xed10 SCR System Control Register
+  0xed14 CCR Configuration and Control Register
+  0xed1c SHPR2 System Handler Priority Register 2
+  0xed20 SHPR3 System Handler Priority Register 3
+  0xed24 SHCSR System Handler Control and State Register
+  0xed90 MPU_TYPE MPU Type Register
+  0xed94 MPU_CTRL MPU Control Register
+  0xed98 MPU_RNR MPU Region Number Register
+  0xed9c MPU_RBAR MPU Region Base Address Register
+  0xeda0 MPU_RASR MPU Region Attribute and Size Register
