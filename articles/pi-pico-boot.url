@@ -1,0 +1,210 @@
+
+# 2.7. Boot Sequence in << RP2040 Datasheet >> .pdf
+  Several components of the RP2040 work together to get to a point where the processors are out of reset and able to run the bootrom (Section 2.8). The bootrom is software that is built into the chip, performing the "processor controlled" part of the boot sequence. We will refer to the steps before the processor is running as the "hardware controlled" boot sequence.
+  The hardware controlled boot sequence is as follows:
+    • Power is applied to the chip and the RUN pin is high. (If RUN is low then the chip will be held in reset.)
+    • The On-Chip Voltage Regulator (Section 2.10) waits until the digital core supply (DVDD) is stable
+    • The Power-On State Machine (Section 2.13) is started. To summarise the sequence:
+	◦ The Ring Oscillator (Section 2.17) is started, providing a clock source to the clock generators. clk_sys and clk_ref are now running at a relatively low frequency (typically 6.5MHz).	◦ The reset controller (Section 2.14), the execute-in-place hardware (Section 2.6.3), memories (Section 2.6.2 and Section 2.6.1), Bus Fabric (Section 2.1), and Processor Subsystem (Section 2.3) are taken out of reset.
+	◦ Processor core 0 and core 1 begin to execute the bootrom (Section 2.8).
+
+# 2.8. Bootrom
+  The Bootrom size is limited to 16 kB. It contains:
+    • Processor core 0 initial boot sequence.
+    • Processor core 1 low power wait and launch protocol.
+    • USB MSC class-compliant bootloader with UF2 support for downloading code/data to FLASH or RAM.
+    • USB PICOBOOT bootloader interface for advanced management.
+    • Routines for programming and manipulating the external flash.
+    • Fast floating point library.
+    • Fast bit counting / manipulation functions.
+    • Fast memory fill / copy functions.
+
+  Bootrom Source Code
+  The full source for the RP2040 bootrom can be found at https://github.com/raspberrypi/pico-bootrom. This includes both version 1 and version 2 of the bootrom, which correspond to the B0 and B1 silicon revisions, respectively.
+  # 2.8.1. Processor Controlled Boot Sequence
+    A flow diagram of the boot sequence is given in Figure 15.
+    After the hardware controlled boot sequence described in Section 2.7, the processor controlled boot sequence starts:
+      • Reset to both processors released: both enter ROM at same location
+      • Processors check SIO.CPUID
+	◦ Processor 1 goes to sleep (WFE with SCR.SLEEPDEEP enabled) and remains asleep until woken by user code, via the mailbox
+	◦ Processor 0 continues executing from ROM
+      • If power up event was from Rescue DP, clear this flag and halt immediately
+	◦ The debug host (which initiated the rescue) will provide further instruction.
+      • If watchdog scratch registers set to indicate pre-loaded code exists in SRAM, jump to that code
+      • Check if SPI CS pin is tied low ("bootrom button"), and skip flash boot if so.
+      • Set up IO muxing, pad controls on QSPI pins, and initialise Synopsys SSI for standard SPI mode
+      • Issue XIP exit sequence, in case flash is still in an XIP mode and has not been power-cycled
+      • Copy 256 bytes from SPI to internal SRAM (SRAM5) and check for valid CRC32 checksum
+      • If checksum passes, assume what we have loaded is a valid flash second stage
+      • Start executing the loaded code from SRAM (SRAM5)
+      • If no valid image found in SPI after 0.5 seconds of attempting to boot, drop to USB device boot
+      • USB device boot: appear as a USB Mass Storage Device
+	◦ Can program the SPI flash, or load directly into SRAM and run, by dragging and dropping an image in UF2 format.
+	◦ Also supports an extended PICOBOOT interface
+
+    # 2.8.1.1. Watchdog Boot
+    Watchdog boot allows users to install their own boot handler, and divert control away from the main boot sequence on non-POR/BOR resets. It also simplifies running code over the JTAG test interface. It recognises the following values written to the watchdog’s upper scratch registers:
+	• Scratch 4: magic number 0xb007c0d3
+	• Scratch 5: Entry point XORed with magic -0xb007c0d3 ( 0x4ff83f2d )
+	• Scratch 6: Stack pointer
+	• Scratch 7: Entry point
+    If either of the magic numbers mismatch, watchdog boot does not take place. If the numbers match, the Bootrom zeroes scratch 4 before transferring control, so that the behaviour does not persist over subsequent reboots. 
+    # 2.8.1.2. Flash Boot Sequence
+    One of the main challenges of a warm flash boot is forcing the external flash from XIP mode to a mode where it will accept standard SPI commands. There is no standard method to discontinue XIP on an unknown flash. The Bootrom provides a best-effort sequence with broad compatibility, which is as follows:
+	• CSn=1 , IO[3:0]=4’b0000 (via pull downs to avoid contention), issue x32 clocks
+	• CSn=0 , IO[3:0]=4’b1111 (via pull ups to avoid contention), issue x32 clocks
+	• CSn=1
+	• CSn=0 , MOSI=1’b1 (driven low-Z, all other IOs Hi-Z), issue x16 clocks
+    This is designed to miss the XIP continuation codes on Cypress, Micron and Winbond parts. If the device is already in SPI mode, it interprets this sequence as two FFh NOP instructions, which should be ignored. As this is best effort only, there may be some devices which obstinately remain in XIP mode. There are then two options:
+	• Use a less efficient XIP mode where each transfer has an SPI instruction prefix, so the flash device remains communicative in SPI mode.
+	• Boot code installs a compatible XIP exit sequence in SRAM, and configures the watchdog such that a warm boot will jump straight into this sequence, foregoing our canned sequence.
+
+  After issuing the XIP exit sequence, the Bootrom attempts to read in the second stage from flash using standard 03h serial read commands, which are near-universally supported. Since the Bootrom is immutable, it aims for compatibility rather than performance.
+    # 2.8.1.3. Flash Second Stage
+    The flash second stage must configure the SSI and the external flash for the best possible execute-in-place performance. This includes interface width, SCK frequency, SPI instruction prefix and an XIP continuation code for address-data only modes. Generally some operation can be performed on the external flash so that it does not require an instruction prefix on each access, and will simply respond to addresses with data. Until the SSI is correctly configured for the attached flash device, it is not possible to access flash via the XIP address window. Additionally, the Synopsys SSI can not be reconfigured at all without first disabling it. Therefore the second stage must be copied from flash to SRAM by the bootrom, and executed in SRAM. Alternatively, the second stage can simply shadow an image from external flash into SRAM, and not configure execute-in-place. This is the only job of the second stage. All other chip setup (e.g. PLLs, Voltage Regulator) can be performed by platform initialisation code executed over the XIP interface, once the second stage has run.
+      # 2.8.1.3.1. Checksum
+      The last four bytes of the image loaded from flash (which we hope is a valid flash second stage) are a CRC32 checksum of the first 252 bytes. The parameters of the checksum are:
+	• Polynomial: 0x04c11db7
+	• Input reflection: no
+	• Output reflection: no
+	• Initial value: 0xffffffff
+	• Final XOR: 0x00000000
+	• Checksum value appears as little-endian integer at end of image
+      The Bootrom makes 128 attempts of approximately 4ms each for a total of approximately 0.5 seconds before giving up and dropping into USB code to load and checksum the second stage with varying SPI parameters. If it sees a checksum pass it will immediately jump into the 252-byte payload which contains the flash second stage.
+  # 2.8.2. Bootrom Contents
+  Some of the bootrom is dedicated to the implementation of the boot sequence and USB boot interfaces. There is also code in the bootrom useful to user programs. Table 174 shows the fixed memory layout of the first handful of words in the Bootrom which are instrumental in locating other content within the bootrom.
+
+	Table 174. Bootrom contents at fixed (well known) addresses
+	Address 	Contents Description
+
+	0x00000000 	32-bit pointer Initial boot stack pointer
+	0x00000004 	32-bit pointer Pointer to boot reset handler function
+	0x00000008 	32-bit pointer Pointer to boot NMI handler function
+	0x0000000c 	32-bit pointer Pointer to boot Hard fault handler function
+	0x00000010 	'M' , 'u' , 0x01 Magic
+	0x00000013 	byte Bootrom version
+	0x00000014 	16-bit pointer Pointer to a public function lookup table ( rom_func_table )
+	0x00000016 	16-bit pointer Pointer to a public data lookup table ( rom_data_table )
+	0x00000018 	16-bit pointer Pointer to a helper function ( rom_table_lookup() )
+    # 2.8.2.1. Bootrom Functions
+    The Bootrom contains a number of public functions that provide useful RP2040 functionality that might be needed in the absence of any other code on the device, as well as highly optimized versions of certain key functionality that would otherwise have to take up space in most user binaries. These functions are normally made available to the user by the SDK, however a lower level method is provided to locate them (their locations may change with each Bootrom release) and call them directly. Assuming the three bytes starting at address 0x00000010 are ( 'M' , 'u' , 0x01 ) then the three halfwords starting at offset 0x00000014 are valid. These three values can be used to dynamically locate other functions or data within the Bootrom. The version byte at offset 0x00000013 is informational and should not be used to infer the exact location of any functions. The following code from the SDK shows how the three 16-bit pointers are used to lookup other functions or data.
+	SDK: https://github.com/raspberrypi/pico-sdk/tree/master/src/rp2_common/pico_bootrom/bootrom.c Lines 10 - 28
+
+	10 // Bootrom function: rom_table_lookup
+	11 // Returns the 32 bit pointer into the ROM if found or NULL otherwise.
+	12 typedef void *(*rom_table_lookup_fn)(uint16_t *table, uint32_t code);
+	13
+	14 // Convert a 16 bit pointer stored at the given rom address into a 32 bit pointer
+	15 #define rom_hword_as_ptr(rom_address) (void *)(uintptr_t)(*(uint16_t *)rom_address)
+	16
+	17 void *rom_func_lookup(uint32_t code) {
+	18 rom_table_lookup_fn rom_table_lookup = (rom_table_lookup_fn) rom_hword_as_ptr(0x18);
+	19 uint16_t *func_table = (uint16_t *) rom_hword_as_ptr(0x14);
+	20 return rom_table_lookup(func_table, code);
+	21 }
+	22
+	23 void *rom_data_lookup(uint32_t code) {
+	24 rom_table_lookup_fn rom_table_lookup = (rom_table_lookup_fn) rom_hword_as_ptr(0x18);
+	25 uint16_t *data_table = (uint16_t *) rom_hword_as_ptr(0x16);
+	26 return rom_table_lookup(data_table, code);
+	27 }
+
+    The code parameter correspond to the CODE values in the tables below, and is calculated as follows:
+	uint32_t rom_table_code(char c1, char c2) {
+	return (c2 << 8) | c1;
+	}
+
+      # 2.8.2.1.1. Fast Bit Counting / Manipulation Functions
+	These are optimized versions of common bit counting / manipulation functions.
+
+      # 2.8.2.1.2. Fast Bulk Memory Fill / Copy Functions
+	These are highly optimized bulk memory fill and copy functions commonly provided by most language runtimes.
+
+      # 2.8.2.1.3. Flash Access Functions
+	These are low level flash helper functions.
+
+      # 2.8.2.1.4. Debugging Support Functions
+	These two methods simplify the task of calling code on the device and then returning control to the debugger.
+      # 2.8.2.1.5. Miscellaneous Functions
+	These remaining functions don’t fit in other categories and are exposed in the SDK via the pico_bootrom library (see pico_bootrom).
+
+    # 2.8.2.2. Fast Floating Point Library
+	The Bootrom contains an optimized single-precision floating point implementation. The function pointers for these are kept in a single structure found via the rom_data_lookup table (see Section 2.8.2.3).
+      # 2.8.2.2.1. Implementation Details
+      # 2.8.2.2.2. Functions
+
+    # 2.8.2.3. Bootrom Data
+    The Bootrom data table ( rom_data_table ) contains the following pointers.
+
+  # 2.8.3. USB Mass Storage Interface
+  The Bootrom provides a standard USB bootloader that makes a writeable drive available for copying code to the RP2040 using UF2 files (see Section 2.8.3.2).
+A UF2 file copied to the drive is downloaded and written to Flash or RAM, and the device is automatically rebooted, making it trivial to download and run code on the RP2040 using only a USB connection.
+
+    # 2.8.3.1. The RPI-RP2 Drive
+    The RP2040 appears as a standard 128MB flash drive named RPI-RP2 formatted as a single partition with FAT16. There are only ever two actual files visible on the drive specified.
+	• INFO_UF2.TXT - contains a string description of the UF2 bootloader and version.
+	• INDEX.HTM - redirects to information about the RP2040 device.
+    Any type of files may be written to the USB drive from the host, however in general these are not stored, and only appear to be so because of caching on the host side. When a UF2 file is written to the device however, the special contents are recognized and data is written to specified locations in RAM or Flash. On the completed download of an entire valid UF2 file, the RP2040 automatically reboots to run the newly downloaded code.
+
+    # 2.8.3.2. UF2 Format Details
+    There are requirements on a UF2 file to be valid to download to the RP2040. It is important that you always use valid UF2 files (as for example generated by https://github.com/raspberrypi/pico-sdk/tree/master/tools/elf2uf2/main.cpp), as invalid files may be partially written and then silently fail. Note that on some operating systems you may receive a disk write error on failure, but this is not guaranteed.
+	• All data destined for the device must be in a UF2 block with familyID present and set to 0xe48bff56 , and a payload_size of 256 .
+	• All data must be destined for (and fit entirely within) the following memory ranges (depending on the type of binary being downloaded which is determined by the address of the first UF2 block encountered):
+	  a. A regular flash binary
+		▪ 0x10000000 - 0x11000000 Flash: All blocks must be targeted at 256 byte alignments. Writes beyond the end of physical flash will wrap back to the beginning of flash.
+	  b. A RAM only binary
+		▪ 0x20000000 - 0x20042000 Main RAM: Blocks can be positioned with byte alignment.
+		▪ 0x15000000 - 0x15004000 Flash Cache: (since flash is not being targeted, the Flash Cache is available for use as RAM with same properties as Main RAM).
+	Note that traditionally UF2 has only been used to write to Flash, but this is more a limitation of using the metadata free .BIN file as the source to generate the UF2 file. RP2040 takes full advantage of the inherent flexibility of UF2 to support the full range of binaries in the richer .ELF format produced by the build to be used as the source for the UF2 file.
+	• The numBlocks must specify a total size of the binary that fits in the regions specified above
+	• A change of numBlocks or the binary type (determined by UF2 block target address) will discard the current transfer in progress.
+	• All data must be in blocks without the UF2_FLAG_NOT_MAIN_FLASH marking which relates to content to be ignored rather than Flash vs RAM.
+	Note that flash is erased a 4K sector at a time, so writing to only a subset of a 4K flash sector will leave the rest of that flash sector undefined. Beyond that there is no requirement that a binary be contiguous.
+	Note that a binary is considered "downloaded" when each of the numBlocks blocks has been seen at least once in the course of a single valid transfer. The data for a block is only written the first time in case of the host resending duplicate blocks.
+	Note that after downloading a regular flash binary, a reset is performed after which the flash binary second stage (at address 0x10000000 - the start of flash) will be entered (if valid) via the bootrom.
+
+	A downloaded RAM Only binary is entered by watchdog reset into the start of the binary, which is calculated as the lowest address of a downloaded block (with Main RAM considered lower than Flash Cache if both are present). Finally it is possible for host software to temporarily disable UF2 writes via the PICOBOOT interface to prevent interference with operations being performed via that interface (see below), in which case any UF2 file write in progress will be aborted.
+
+  # 2.8.4. USB PICOBOOT Interface
+  The PICOBOOT interface is a low level USB protocol for interacting with the RP2040 while it is in BOOTSEL mode. This interface may be used concurrently with the USB Mass Storage Interface. It provides for flexible reading from and writing to RAM or Flash, rebooting, executing code on the device and a handful of other management functions.
+  Constants and structures related to the interface can be found in the SDK header https://github.com/raspberrypi/pico-sdk/tree/master/src/common/boot_picoboot/include/boot/picoboot.h
+    # 2.8.4.1. Identifying The Device
+    A RP2040 device is recognized by the Vendor ID and Product ID in its device descriptor (shown in Table 183).
+
+    # 2.8.4.2. Identifying The Interface
+    The PICOBOOT interface is recognized by the "Vendor Specific" Interface Class and the zero Interface Sub Class and Interface Protocol (shown in Table 184). Note that you should not rely on the interface number, as that is dependent on whether the device is also exposing the Mass Storage Interface. Note also that the device equally may not be exposing the PICOBOOT interface at all, so you should not assume it is present.
+
+    # 2.8.4.3. Identifying The Endpoints
+    The PICOBOOT interface provides a single BULK OUT and a single BULK IN endpoint. These can be identified by their direction and type. You should not rely on endpoint numbers.
+    # 2.8.4.4. PICOBOOT Commands
+    The two bulk endpoints are used for sending commands and retrieved successful command results. All commands are exactly 32 bytes (see Table 185) and sent to the BULK OUT endpoint.
+
+    # 2.8.4.4.1. EXCLUSIVE_ACCESS (0x01)
+    Claim or release exclusive access for writing to the RP2040 over USB (versus the Mass Storage Interface
+    # 2.8.4.4.2. REBOOT (0x02)
+    Reboots the RP2040 out of BOOTSEL mode. Note that BOOTSEL mode might be re-entered if rebooting to flash and no valid second stage bootloader is found.
+    # 2.8.4.4.3. FLASH_ERASE (0x03)
+    Erases a contiguous range of flash sectors.
+    # 2.8.4.4.4. READ (0x84)
+    Read a contiguous memory (Flash or RAM or ROM) range from the RP2040
+    # 2.8.4.4.5. WRITE (0x05)
+    Writes a contiguous memory range of memory (Flash or RAM) on the RP2040.
+    # 2.8.4.4.6. EXIT_XIP (0x06)
+    Exit Flash XIP mode. This first initialises the SSI for serial transfers, and then issues the XIP exit sequence given in Section 2.8.1.2, to attempt to make the flash responsive to standard serial SPI commands. The SSI is configured with a fixed clock divisor of /6, so the USB bootloader will drive SCLK at 8 MHz.
+    # 2.8.4.4.7. ENTER_XIP (0x07)
+    Enter Flash XIP mode. This configures the SSI to issue a standard 03h serial read command, with 24 address clocks and 32 data clocks, for every XIP access. This is a slow but very widely supported way to read flash. The intent of this function is to make flash easily accessible (i.e. just access addresses in the 0x10…… segment) without having to know the details of exactly what kind of flash is connected. This mode is suitable for executing code from flash, but is much slower than e.g. QSPI XIP access.
+    # 2.8.4.4.8. EXEC (0x08)
+    Executes a function on the device. This function takes no arguments and returns no results, so it must communicate via RAM. Execution of this method will block any other commands as well as Mass Storage Interface UF2 writes, so should only be used in exclusive mode and with extreme care (and it should save and restore registers as per the ARM EABI). This method is called from a regular (non IRQ) context, and has a very limited stack, so the function should use its own.
+    # 2.8.4.4.9. VECTORIZE_FLASH (0x09)
+    Requests that the vector table of flash access functions used internally by the Mass Storage and PICOBOOT interfaces be copied into RAM, such that the method implementations can be replaced with custom versions (For example, if the board uses flash that does not support standard commands)
+  
+  # 2.8.4.5. Control Requests
+  The following requests are sent to the interface via the default control pipe.
+
+    # 2.8.4.5.1. INTERFACE_RESET (0x41)
+    The host sends this control request to reset the PICOBOOT interface. 
+    # 2.8.4.5.2. GET_COMMAND_STATUS (0x42)
+    Retrieve the status of the last command (which may be a command still in progress). Successful completion of a PICOBOOT Protocol Command is acknowledged over the bulk pipe, however if the operation is still in progress or has failed (stalling the bulk pipe), then this method can be used to determine the operation’s status.
+
+# pico_bootrom
+

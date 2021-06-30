@@ -1,0 +1,22 @@
+# Pico Component Locations
+Appendix C in << Raspberry Pi Pico Datasheet >> .pdf
+
+# The pinout of the Raspberry Pi Pico Rev3 board
+Figure 2. The pinout of the Raspberry Pi Pico Rev3 board.  in << Raspberry Pi Pico Datasheet >> .pdf
+
+# Schematic
+Appendix B in << Raspberry Pi Pico Datasheet >> .pdf
+
+# Layout
+The full CAD files, including PCB layout, can be found here. Note that Raspberry Pi Pico was
+designed in Cadence Allegro PCB Editor, and opening in other PCB CAD packages requires an
+import script or plugin. 
+https://datasheets.raspberrypi.org/pico/RPi-Pico-R3-PUBLIC-20200119.zip
+
+# STEP 3D
+A STEP 3D model of Raspberry Pi Pico, for 3D visualisation and fit check of designs which include Raspberry Pi Pico as a module, can be found
+https://datasheets.raspberrypi.org/pico/Pico-R3-step.zip
+
+# Fritzing
+A Fritzing part for use in e.g. breadboard layouts can be found 
+https://datasheets.raspberrypi.org/pico/Pico-R3-Fritzing.fzpz
