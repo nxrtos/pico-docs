@@ -1,0 +1,38 @@
+# This is a quick notes for working picoprobe with oppenocd and gdb
+
+## raspberry pi pico itself can work as a SWD debugger. 
+## There is an implementation picoprobe, using 
+	GP2 	SWCLK
+	GP3 	SWDIO
+	GND 	GND
+
+## It is possible to provide power supply from picoprobe debuger pico.
+## from 
+	VBUS (pin_40) 		# [source from USB input]
+## to
+	VSYS (pin_39) 		# [range 1.8V to 5.5V]
+
+## start gdb server by 
+  sudo openocd -f interface/picoprobe.cfg -f target/rp2040.cfg
+   
+## check other scripts from
+  ls /usr/local/share/openocd/
+
+## start gdb client by 
+  gdb-multiarch
+
+### gdb commands
+	# target connect
+	(gdb) target remote localhost:3333
+
+	# 
+	monitor reset halt
+	# exit halt 
+	c
+	continue
+	
+	# debug halt
+	^c
+
+	# load elf
+	file
