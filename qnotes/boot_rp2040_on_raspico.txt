@@ -1,0 +1,76 @@
+#
+
+## hardware controlled boot sequence
+
+
+### processor controlled boot
+ref to [2.7. Boot Sequence] in <<rp2040-datasheet.pdf>>
+
+## Bootrom
+ref to [2.8. Bootrom] in <<rp2040-datasheet.pdf>>
+
+The Bootrom size is limited to 16 kB. It contains:
+	•Processor core 0 initial boot sequence.
+	•Processor core 1 low power wait and launch protocol.
+	•USB MSC class-compliant bootloader with UF2 support for downloading code/data to FLASH or RAM
+	•USB PICOBOOT bootloader interface for advanced management.
+	•Routines for programming and manipulating the external flash.
+	•Fast floating point library.
+	•Fast bit counting / manipulation functions.
+	•Fast memory fill / copy functions
+
+  The full source for the RP2040 bootrom can be found at 
+  https://github.com/raspberrypi/pico-bootrom .
+  This includes both version 1 and version 2 of the bootrom, which correspond to the B0 and B1 siliconrevisions, respectively.
+
+### Processor Controlled Boot Sequence
+ 
+refer to [2.8.1. Processor Controlled Boot Sequence] 
+
+#### Watchdog Boot
+refer to [2.8.1.1. Watchdog Boot]
+
+#### Flash Boot Sequence
+refer to [2.8.1.2. Flash Boot Sequence]
+
+drive external  flash  from  XIP  mode  to  a  mode  where it will accept  standard  SPI  commands.  
+
+### Flash Second Stage
+refer to [2.8.1.3. Flash Second Stage] in <<rp2040-datasheet.pdf>>
+configure  the  SSI  and  the  external  flash  for  the  best  possible  execute-in-placeperformance.  This  includes  interface  width,  SCK  frequency,  SPI  instruction  prefix  and  an  XIP  continuation  code  for address-data only modes. 
+
+#### Checksum
+ CRC32 checksumof the first 252 bytes, 
+	•Polynomial: 0x04c11db7•Input reflection: no
+	•Output reflection: no
+	•Initial value: 0xffffffff
+	•Final XOR: 0x00000000
+	•Checksum value appears as little-endian integer at end of image
+
+### Bootrom Contents
+refer to 2.8.2. Bootrom Contents
+
+table 174. Bootromcontents at fixed (wellknown) addresses
+	Address		Contents	Description
+	0x00000000	32-bit 	pointerInitial boot stack pointer
+
+	0x00000004	32-bit 	pointerPointer to boot reset handler function
+	0x00000008	32-bit 	pointerPointer to boot NMI handler function
+
+	0x0000000c	32-bit 	pointerPointer to boot Hard fault handler function
+	0x00000010	'M', 'u', 0x01 Magic
+
+	0x00000013	byte	Bootrom version
+
+	0x00000014	16-bit pointer	Pointer to a public function lookup table (rom_func_table)
+
+
+
+refer to  2.8.3. USB Mass Storage Interface 
+ and	  2.8.4. USB PICOBOOT Interface
+ for USB interfaces provided by BootROM. 
+
+
+	
+## Memory Map:
+

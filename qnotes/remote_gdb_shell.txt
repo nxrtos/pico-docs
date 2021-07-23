@@ -1,0 +1,104 @@
+# quick notes for gdb shell (command line) to remote debugging
+
+# rather than using native gdb, start cross debugger client by
+gdb-multiarch
+  # or
+gdb-multiarch  path/my_program.elf
+
+
+# connect to target mcu/embedded board
+	#  start a gdb server to connect remote target first, by eg.
+	#  sudo openocd -f interface/picoprobe.cfg  -f target/rp2040.cfg
+	#  to listen port 3333 on localhost
+(gdb)  target remote localhost:3333
+
+# read symbol file and exe binary
+(gdb)  file  path/my_program.elf
+
+# load/flash program
+(gdb)  load
+
+# reset target /w halt
+(gdb)  monitor reset 
+  # or
+(gdb)  monitor reset halt
+
+
+# set breakpoint at a file line
+(gdb)  b  10
+ # or
+(gdb)  b  function_name:10
+
+# show information on breakpoints
+(gdb)  info b
+
+# delete a breakpoint num
+(gdb)  d br 2
+
+# show source files
+(gdb)  info sources
+
+# List specified function or line
+	# list code about the function_entry
+(gdb)  list _entry_point
+	# list about the line in 'current file'
+(gdb)  list 5
+  # or  specific fule and line
+(gdb)  list path/my_file.c:5
+
+# next 
+(gdb)  n
+
+# step
+(gdb)  s
+
+# Examining Memory, x/nfu addr	,x addr	,x
+(gdb)  x  0x100
+(gdb)  x  main
+(gdb)  x  _entry_point
+(gdb)  x  
+
+# Print the names and values of all registers except floating-point and vector registers
+(gdb)  info registers
+
+
+# print
+(gdb)  p  variable
+
+# run/continue the program
+(gdb)  c
+
+# pause running program
+^c
+
+# Print backtrace of all stack frames, or innermost COUNT frames
+(gdb)  bt
+  # or 2 levels of backtrace
+(gdb)  bt 2
+
+# Print value of expression EXP each time the program stops.
+(gdb)  display main
+
+
+
+# many helps
+(gdb)  help
+  # or
+(gdb)  help info
+(gdb)  help target
+(gdb)  help break
+
+
+# quit
+(gdb)  q
+  # or
+(gdb)  Ctrl-d 
+
+
+#####################################################################
+# refs
+https://www.96boards.org/blog/gui-command-line-remote-debugging/
+https://visualgdb.com/tutorials/raspberry/pico/pio/debugger/
+https://visualgdb.com/tutorials/raspberry/pico/picoprobe/
+
+https://sourceware.org/gdb/onlinedocs/gdb

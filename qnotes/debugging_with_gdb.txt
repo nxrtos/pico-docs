@@ -1,0 +1,12 @@
+# Debugging with GDB
+https://tinygo.org/docs/tutorials/gdb/
+
+# Beej's Quick Guide to GDB
+http://beej.us/guide/bggdb/
+
+https://sourceware.org/gdb/onlinedocs/gdb/index.html
+https://sourceware.org/gdb/documentation/
+https://sourceware.org/gdb/
+####################################################
+
+

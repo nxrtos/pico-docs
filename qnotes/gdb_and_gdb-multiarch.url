@@ -1,0 +1,11 @@
+# debugging multi-arch
+https://sourceware.org/gdb/papers/multi-arch/
+
+####################################################################
+# single architecture debugger:
+For the most part this is what GDB is today. If you want to debug a MIPS/32 (O32 ABI) binary you build GDB for the MIPS/32. If you want to to instead debug a SPARC (or even a MIPS/64 - N64 ABI) then you need to build a second (and third) debugger.
+# multiple architecture debugger:
+The limitation of a single GDB being restricted to a single architecture is removed. A single GDB binary being able to debug any of a number of architectures for which GDB was built.
+You might build GDB with support for both MIPS and SPARC targets. More typically, however, you will be building a GDB with support for a plithera of ISA variants (as with the MIPS case). A very simple example is support for both big and little byte ordered variants. 
+# simultaneous multi-architecture debugger:
+This would have to be the holy grail of debugger technology :-) 
