@@ -1,0 +1,28 @@
+﻿# consideration to implement rtos for rp2040 with smp support
+
+The OS objects will be shared by two cores, and so exclusive accessing/manipulation need an extra mechanism over than masking privilege levels sufficient on uni-core processor.
+
+HW spinlock provided and assist to competing exclusive access between smp cores. 
+It seems that with perterson's algorithm pure software can achieve fundamental spinlock functionality. (More research and experiment may needed)
+
+The PendSV will (still) be used for thread context-switch. Each core has their own NVIC, so trigger PendSV only to its own core. In order to trigger other core to performing scheduler processing, may need to through FIFO in SIO. There are two FIFOs each is uni-direction and so dedicate for core0 to core1 and core1 to core0. When dada available in FIFO, the IRQ asserted accordingly. This can be used to trigger PendSV in other core indirectly.
+
+To allow jobs to be scheduled evenly to two cores, it needs a common shared job list, so the scheduler runs on either core can pick ready job into execution. But this also increase the chance of competing access between the cores, so proper synchronization mechanism needed. 
+
+The other consideration is that to add extra list for exclusive use, for example when common shared job list queue is hold by other core, the new job may drop into dedicated job list queue for other core to receive, and send FIFO in SIO to trigger IRQ on other core.
+
+For the new committed job will be put on execution on local core, it can be directly raise privilege and then new the thread context. 
+
+The general critical section usage in RTOS for uni-processor may commonly need to add specific spinlock protection in SMP condition. The form could be like
+
+	orig_critic_level = get_current_critic_level();
+
+	raise_critic_level(target_level);
+	getlock_spinlock(slock_x_hdl);
+	{
+	  // needed works
+	}	
+	releaselock_spinlock(slock_x_hdl);
+	drop_critic_level(orig_critic_level);
+
+In order to minimize the chance of collision/competing, more spin_lock created to handle logically orthogonal resource. For example the common shared ready job list and conditional job list are separated resource and so using different spin_lock to protect.  
