@@ -170,7 +170,7 @@ This UART wasn't work reliable, so could be better to use extra USB-Serial dongl
 
 
 
-# Build openocd for RasPi GPIO SWD master interface 
+# Build openocd for RasPi BCM2835GPIO SWD interface and Picoprobe interface
 
 On Raspberry Pi, in case the default openocd doesn't include raspberry_gpio_swd support, then build it manually. 
 
@@ -180,7 +180,7 @@ $ sudo apt install automake autoconf build-essential texinfo libtool libftdi-dev
 $ git clone https://github.com/raspberrypi/openocd.git --recursive --branch rp2040 --depth=1
 $ cd openocd/
 $ ./bootstrap
-$ ./configure --enable-ftdi --enable-sysfsgpio --enable-bcm2835gpio
+$ ./configure --enable-ftdi --enable-sysfsgpio --enable-bcm2835gpio --enable-picoprobe
 $ make
 $ sudo make install
 ```
