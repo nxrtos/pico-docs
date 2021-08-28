@@ -8,6 +8,14 @@ So as an example on a rasPi with GPIO_SWD deriver settings, it could start a gdb
 
 
 
+# openocd  program  flash  directly
+
+```bash
+sudo  openocd -f interface/raspberrypi-swd.cfg -f target/rp2040.cfg -c "program blink/blink.elf verify reset exit"
+```
+
+
+
 # GDB Client connect to remote GDB_Server by openocd on Raspberry Pi
 
 ```
@@ -130,20 +138,27 @@ $ cmake -DCMAKE_BUILD_TYPE=Debug ..
 
 # UART connection
 
-In case want to use UART (GPIO_14/15; ) on Raspberry Pi to cross connect to UARTx on RasPico,  through /dev/ttyAMA0.
+In case want to use UART (GPIO_14/15; ) on Raspberry Pi to cross connect to UARTx on RasPico,  through /dev/ttyS0.
 
 ```
-$ sudo chmod 777 /dev/ttyAMA0
-$ screen /dev/ttyAMA0 115200
+$ sudo chmod 777 /dev/ttyS0
+$ screen /dev/ttyS0 115200
 ```
 
-It may need a configure to connect GPIO_14/15 to UART function ttyAMA0 . 
+It may need a configure to connect GPIO_14/15 to UART function ttyS0 . 
+
+[RasPi Configuration]: https://www.raspberrypi.org/documentation/computers/configuration.html#configuring-uarts
 
 []: https://www.abelectronics.co.uk/kb/article/1035/raspberry-pi-3--4-and-zero-w-serial-port-usage	"Serial Port setup in Raspberry Pi OS"
 
- This is little tricky as the overlay functions on RasPi.  May not work with WiFi simultaneously. 
+| Raspberry Pi Pico |        Raspberry Pi        |
+| :---------------: | :------------------------: |
+|                   |  GPIO 14 (transmit)pin 8   |
+|                   | GPIO 15  (receive) pin 10. |
 
-# Wire connections (Raspberry Pi Pico to Raspberry Pi)
+This UART wasn't work reliable, so could be better to use extra USB-Serial dongle to do the job.  Or try to tweak the baud rate.  It seems that the internal clock is the cause of issue.
+
+#   Wire connections (Raspberry Pi Pico to Raspberry Pi)
 
  The following table shows all the necessary connections between Raspberry Pi and Raspberry Pi Pico that you need to make.
 
@@ -160,11 +175,13 @@ It may need a configure to connect GPIO_14/15 to UART function ttyAMA0 .
 On Raspberry Pi, in case the default openocd doesn't include raspberry_gpio_swd support, then build it manually. 
 
 ```
-$ sudo apt install automake autoconf build-essential texinfo libtool libftdi-dev libusb-1.0-0-dev
+$ sudo apt install automake autoconf build-essential texinfo libtool libftdi-dev libusb-1.0-0-dev pkg-config
 
-$ git clone https://github.com/raspberrypi/openocd.git –recursive –branch rp2040 –depth=1
+$ git clone https://github.com/raspberrypi/openocd.git --recursive --branch rp2040 --depth=1
 $ cd openocd/
-$ ./conﬁgure –enable-ftdi –enable-sysfsgpio –enable-bcm2835gpio
+$ ./bootstrap
+$ ./configure --enable-ftdi --enable-sysfsgpio --enable-bcm2835gpio
 $ make
 $ sudo make install
 ```
+
