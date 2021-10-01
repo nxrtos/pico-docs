@@ -1,0 +1,106 @@
+# The mechanism for inter-core communication is vital 
+On RP2040 the SIO provides some dedicated functions to help.
+
+SIO: FIFO is the most important part. Check 'SIO: FIFO' in rp2040_datasheet.pdf
+
+
+# in pico-sdk, 
+src/rp2_common/pico_multicore/include/pico/multicore.h
+	# and 
+src/rp2040/hardware_regs/include/hardware/regs/sio.h
+# provides related data and functions. search 
+SIO_FIFO for info.
+
+# pico_multicore, High Level API
+https://raspberrypi.github.io/pico-sdk-doxygen/group__pico__multicore.html
+https://raspberrypi.github.io/pico-sdk-doxygen/group__multicore__fifo.html
+
+
+##########################################################################
+2.3.1.7. List of Registers
+The SIO registers start at a base address of 0xd0000000 (defined as SIO_BASE in SDK).
+Offset 		Name 		Info
+0x050 		FIFO_ST 	Status register for inter-core FIFOs (mailboxes).
+0x054 		FIFO_WR 	Write access to this core’s TX FIFO
+0x058 		FIFO_RD 	Read access to this core’s RX FIFO
+
+SIO: FIFO_ST Register
+Offset: 0x050
+Description
+Status register for inter-core FIFOs (mailboxes).
+There is one FIFO in the core 0 → core 1 direction, and one core 1 → core 0. Both are 32 bits wide and 8 words deep.
+Core 0 can see the read side of the 1→0 FIFO (RX), and the write side of 0→1 FIFO (TX).
+Core 1 can see the read side of the 0→1 FIFO (RX), and the write side of 1→0 FIFO (TX).
+The SIO IRQ for each core is the logical OR of the VLD, WOF and ROE fields of its FIFO_ST register.
+
+Bits 	Name 		Description 						Type 	Reset
+31:4 	Reserved. 	- - -
+3 	ROE 		Sticky flag indicating the RX FIFO was read when empty. 	WC 0x0
+			This write was ignored by the FIFO.
+
+2	WOF		Sticky flag indicating the TX FIFO was written when full. 	WC 0x0
+			This write was ignored by the FIFO.
+
+1	RDY		Value is 1 if this core’s TX FIFO is not full 			RO 0x1
+			(i.e. if FIFO_WR is ready for more data)
+0	VLD		Value is 1 if this core’s RX FIFO is not empty 			RO 0x0
+			(i.e. if FIFO_RD is valid)
+
+SIO: FIFO_WR Register
+Offset: 0x054
+Bits 	Description 		Type 	Reset
+31:0 	Write access to this core’s TX FIFO 	WF 		0x00000000
+
+SIO: FIFO_RD Register
+Offset: 0x058
+Bits Description Type Reset
+31:0 Read access to this core’s RX FIFO RF -
+
+################################################################################
+2.3.1.4. Inter-processor FIFOs (Mailboxes)
+The SIO contains two FIFOs for passing data, messages or ordered events between the two cores. Each FIFO is 32 bits
+wide, and eight entries deep. One of the FIFOs can only be written by core 0, and read by core 1. The other can only be
+written by core 1, and read by core 0.
+Each core writes to its outgoing FIFO by writing to FIFO_WR, and reads from its incoming FIFO by reading from FIFO_RD.
+A status register, FIFO_ST, provides the following status signals:
+• Incoming FIFO contains data ( VLD )
+• Outgoing FIFO has room for more data ( RDY )
+• The incoming FIFO was read from while empty at some point in the past ( ROE )
+• The outgoing FIFO was written to while full at some point in the past ( WOF )
+Writing to the outgoing FIFO while full, or reading from the incoming FIFO while empty, does not affect the FIFO state.
+The current contents and level of the FIFO is preserved. However, this does represent some loss of data or reception of
+invalid data by the software accessing the FIFO, so a sticky error flag is raised ( ROE or WOF ).
+The SIO has a FIFO IRQ output for each core, mapped to system IRQ numbers 15 and 16 . Each IRQ output is the logical
+OR of the VLD , ROE and WOF bits in that core’s FIFO_ST register: that is, the IRQ is asserted if any of these three bits is high,
+and clears again when they are all low. The ROE and WOF flags are cleared by writing any value to FIFO_ST, and the VLD flag
+is cleared by reading data from the FIFO until empty.
+If the corresponding interrupt line is enabled in the Cortex-M0+ NVIC, then the processor will take an interrupt each time
+data appears in its FIFO, or if it has performed some invalid FIFO operation (read on empty, write on full). Typically Core
+0 will use IRQ15 and core 1 will use IRQ16. If the IRQs are used the other way round then it is difficult for the core that
+has been interrupted to correctly identify the reason for the interrupt as the core doesn’t have access to the other core’s
+FIFO status register.
+ NOTE
+ROE and WOF only become set if software misbehaves in some way. Generally, the interrupt handler will trigger when
+data appears in the FIFO (raising the VLD flag), and the interrupt handler clears the IRQ by reading data from the FIFO
+until VLD goes low once more.
+The inter-processor FIFOs and the Cortex-M0+ Event signals are used by the bootrom (Section 2.8) wait_for_vector
+routine, where core 1 remains in a sleep state until it is woken, and provided with its initial stack pointer, entry point and
+vector table through the FIFO.
+
+######################################################################################
+2.3.2. Interrupts
+Each core is equipped with a standard ARM Nested Vectored Interrupt Controller (NVIC) which has 32 interrupt inputs. Each NVIC has the same interrupts routed to it, with the exception of the GPIO interrupts: there is one GPIO interrupt per bank, per core. These are completely independent, so e.g. core 0 can be interrupted by GPIO 0 in bank 0, and core 1 by GPIO 1 in the same bank.
+On RP2040, only the lower 26 IRQ signals are connected on the NVIC, and IRQs 26 to 31 are tied to zero (never firing). The core can still be forced to enter the relevant interrupt handler by writing bits 26 to 31 in the NVIC ISPR register.
+
+15 SIO_IRQ_PROC0
+16 SIO_IRQ_PROC1
+
+Nested interrupts are supported in hardware: a lower-priority interrupt can be preempted by a higher-priority interrupt (or another exception e.g. HardFault), and the lower-priority interrupt will resume once higher-priority exceptions have completed. The priority order is determined by:
+• First, the dynamic priority level configured per interrupt by the NVIC_IPR0-7 registers. The Cortex-M0+ implements the two most significant bits of an 8-bit priority field, so four priority levels are available, and the numerically-lowest level (level 0) is the highest priority.
+• Second, for interrupts with the same dynamic priority level, the lower-numbered IRQ has higher priority (using the IRQ numbers given in the table above).
+Some care has gone into arranging the RP2040 interrupt table to give a sensible default priority ordering, but individual interrupts can be raised or lowered in priority, using NVIC_IPR0 through NVIC_IPR7, to suit a particular use case.
+The 26 system IRQ signals are masked (NMI mask) and then ORed together creating the NMI signal for the core. The NMI mask for each core can be configured using PROC0_NMI_MASK and PROC1_NMI_MASK in the Syscfg register block. Each of these registers has one bit for each system interrupt, and the each core’s NMI is asserted if a system interrupt is asserted and the corresponding NMI mask bit is set for that core.
+
+ CAUTION
+If the watchdog is armed, and some bits are set on the core 1 NMI mask, the RESETS block (and hence Syscfg) should be included in the watchdog reset list. Otherwise, following a watchdog event, core 1 NMI may be asserted when the core enter the bootrom. It is safe for core 0 to take an NMI when entering the bootrom (the handler will clear the NMI mask).
+
