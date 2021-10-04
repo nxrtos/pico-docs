@@ -11,21 +11,21 @@ On Raspberry Pi, in case the default openocd doesn't include raspberry_gpio_swd 
 ```
 $ sudo apt install automake autoconf build-essential texinfo libtool libftdi-dev libusb-1.0-0-dev pkg-config
 
+$ git clone https://github.com/raspberrypi/openocd.git --recursive 
+# or 
 $ git clone https://github.com/raspberrypi/openocd.git --recursive --branch rp2040 --depth=1
 $ cd openocd/
 $ ./bootstrap
 $ ./configure --enable-ftdi --enable-sysfsgpio --enable-bcm2835gpio --enable-picoprobe
 $ make
 $ sudo make install
+
+{{{ ### extra note.  The openocd build procedure may fail on platform rsapi_zerow running kali for low RAM and try again seems get it over .		### extra note }}} 
 ```
 
 
 
-
-
-
-
-
+# Start  gdb-server  through  OpenOCD
 
 By default openocd start gdb_server listen port 3333 on interface of localhost only.
 
@@ -33,9 +33,9 @@ By adding `-c "bindto 0.0.0.0"` to the end of openocd, the gdb_server started wi
 So as an example on a rasPi with GPIO_SWD deriver settings, it could start a gdb_server as 
 `sudo  openocd -f interface/raspberrypi-swd.cfg -f target/rp2040.cfg -c "bindto 0.0.0.0" ` 
 
+assuming to use  GPIO_SWD  on  rasPi  to  connect  raspico's  SWD .
 
-
-# openocd  program  flash  directly
+# through openocd  to program  flash  directly
 
 ```bash
 sudo  openocd -f interface/raspberrypi-swd.cfg -f target/rp2040.cfg -c "program blink/blink.elf verify reset exit"
@@ -46,6 +46,8 @@ sudo  openocd -f interface/raspberrypi-swd.cfg -f target/rp2040.cfg -c "program 
 # GDB Client connect to remote GDB_Server by openocd on Raspberry Pi
 
 ```
+$ sudo apt-get install gdb-multiarch
+
 $ gdb-multiarch
 
 # target remote  gdb_server_ip:gbd_port_num
@@ -196,4 +198,23 @@ This UART wasn't work reliable, so could be better to use extra USB-Serial dongl
 |               SWCLK                |              GPIO 25 (PIN 22)               |
 
 
+
+# PICO-SDK  install and setup
+
+```
+$  sudo apt install cmake gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+
+$  git clone --recursive  https://github.com/raspberrypi/pico-sdk.git
+
+$  export PICO_SDK_PATH={pathto}/pico-sdk
+
+$  git clone --recursive  https://github.com/raspberrypi/pico-examples.git
+
+$  cd  pico-examples
+   mkdir  build
+   cd  build
+   cmake  ..
+   make 
+{{{ ### extra note.  The openocd build procedure may fail on platform rsapi_zerow running kali for low RAM and try again seems get it over .		### extra note }}} 
+```
 
