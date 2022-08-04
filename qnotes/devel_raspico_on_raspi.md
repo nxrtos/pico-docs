@@ -184,6 +184,7 @@ It may need a configure to connect GPIO_14/15 to UART function ttyS0 .
 | :---------------: | :------------------------: |
 |                   |  GPIO 14 (transmit)pin 8   |
 |                   | GPIO 15  (receive) pin 10. |
+|                   |                            |
 
 This UART wasn't work reliable, so could be better to use extra USB-Serial dongle to do the job.  Or try to tweak the baud rate.  It seems that the internal clock is the cause of issue.
 
@@ -196,6 +197,8 @@ This UART wasn't work reliable, so could be better to use extra USB-Serial dongl
 |               SWDIO                |              GPIO 24 (PIN 18)               |
 |              SWD GND               |                GND (PIN 20)                 |
 |               SWCLK                |              GPIO 25 (PIN 22)               |
+|                                    |                                             |
+|           VBUS (pin 40)            |              5V (pin 2, pin 4)              |
 
 
 
